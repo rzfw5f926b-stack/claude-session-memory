@@ -83,11 +83,12 @@ score = 0.7 × cosine_similarity + 0.2 × recency + 0.1 × complexity
 
 ## Prerequisites
 
-- Python 3.10+
+- Python **3.10+** (required for `list[dict]` type syntax)
 - `numpy` (`pip install numpy`)
-- A local embedding endpoint at `http://localhost:11435/v1/embed`
-  - Compatible with [macOSUtilityBridge](https://github.com/) (Apple NLEmbedding 512d)
-  - Or any server accepting `{"text": "...", "language": "en"}` → `{"embedding": [...]}`
+- A local embedding endpoint. Options (pick one):
+  - **[Ollama](https://ollama.com)** (easiest): `ollama pull nomic-embed-text` then set `CLAUDE_EMBED_URL=http://localhost:11434/api/embed` — note: Ollama uses a different request format, see [Adapters](#embedding-adapters) below
+  - **OpenAI-compatible server**: any server accepting `POST {"text": "...", "language": "en"}` → `{"embedding": [...]}`
+  - **[macOSUtilityBridge](https://github.com/)** (macOS only): Apple NLEmbedding 512d at `localhost:11435`
 - An LLM CLI for weekly reflection — any of the following works:
   - [`llm`](https://llm.datasette.io) (default) — `pip install llm && llm keys set openai`
   - [`ollama`](https://ollama.com) — `ollama run llama3`
@@ -205,6 +206,37 @@ CREATE TABLE self_evals (
 | `wrong` | Multiple corrections / user clearly unsatisfied / wrong direction |
 
 The weekly reflection uses the distribution of verdicts to identify patterns and update `insights.md`.
+
+## Embedding Adapters
+
+The default embed endpoint expects `{"text": "...", "language": "en"}`. If you use Ollama (which uses a different format), add a small adapter in front:
+
+```python
+# ollama_embed_adapter.py — run as: python3 ollama_embed_adapter.py
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import json, urllib.request
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        req = urllib.request.Request(
+            "http://localhost:11434/api/embed",
+            data=json.dumps({"model": "nomic-embed-text", "input": body["text"]}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST"
+        )
+        with urllib.request.urlopen(req) as r:
+            data = json.loads(r.read())
+        result = json.dumps({"embedding": data["embeddings"][0]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(result)
+    def log_message(self, *_): pass
+
+HTTPServer(("localhost", 11435), Handler).serve_forever()
+```
+
+Then set `CLAUDE_EMBED_URL=http://localhost:11435/v1/embed` (default).
 
 ## License
 

@@ -3,19 +3,18 @@
 # Runs every Sunday, reads sessions from the past week, produces insights.md update
 #
 # Requires an LLM CLI that accepts piped input. Configure via CLAUDE_LLM_CMD:
-#   export CLAUDE_LLM_CMD="mmx text chat --non-interactive --quiet --message"
+#   export CLAUDE_LLM_CMD="llm"          # Simon Willison's llm CLI (default)
 #   export CLAUDE_LLM_CMD="ollama run llama3"
 #   export CLAUDE_LLM_CMD="sgpt"         # shell-gpt
-#   export CLAUDE_LLM_CMD="llm"          # Simon Willison's llm CLI
-# Default: reads from CLAUDE_LLM_CMD env var, falls back to 'llm' (https://llm.datasette.io)
+# Default: 'llm' (https://llm.datasette.io)
 set -euo pipefail
 
-MEMORY_TOOLS="$HOME/.claude/memory_tools"
 VECTOR_DIR="${CLAUDE_MEMORY_DIR:-$HOME/.claude/memory_vectors}"
 INSIGHTS="$VECTOR_DIR/insights.md"
 LATEST_REF="$VECTOR_DIR/latest_reflection.json"
-LOG="$HOME/.claude/logs/claude-reflect-$(date +%Y-%m-%d).log"
-mkdir -p "$HOME/.claude/logs"
+LOG_DIR="${CLAUDE_LOG_DIR:-$HOME/.claude/logs}"
+LOG="$LOG_DIR/claude-reflect-$(date +%Y-%m-%d).log"
+mkdir -p "$LOG_DIR"
 
 log() { echo "[$(date +%H:%M:%S)] $1" | tee -a "$LOG"; }
 
@@ -23,14 +22,14 @@ log "=== Claude Weekly Reflection ($(date +%Y-%m-%d)) ==="
 
 # 1. Gather this week's session data
 log "Gathering session data..."
-DATA=$(python3 - <<'EOF'
-import json, sqlite3
+DATA=$(CLAUDE_MEMORY_DIR="${VECTOR_DIR}" python3 - <<'PYEOF'
+import json, sqlite3, os
 from datetime import date, timedelta
 from pathlib import Path
 
-db_path = Path.home() / ".claude/projects/-Users-h60613/memory_vectors/claude_memory.db"
+db_path = Path(os.environ.get("CLAUDE_MEMORY_DIR", Path.home() / ".claude" / "memory_vectors")) / "claude_memory.db"
 if not db_path.exists():
-    print(json.dumps({"sessions": [], "total": 0, "good": 0, "mixed": 0, "wrong": 0}))
+    print(json.dumps({"sessions": [], "total_sessions": 0, "week_sessions": 0, "good": 0, "mixed": 0, "wrong": 0}))
     exit()
 
 conn = sqlite3.connect(db_path)
@@ -67,16 +66,17 @@ output = {
     ]
 }
 print(json.dumps(output, ensure_ascii=False))
-EOF
+PYEOF
 )
 
 CURRENT_INSIGHTS=$(cat "$INSIGHTS" 2>/dev/null || echo "(none yet)")
 WEEK=$(date +%G-W%V)
 
-log "Session count this week: $(echo "$DATA" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['week_sessions'])")"
+log "Sessions this week: $(echo "$DATA" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['week_sessions'])")"
 
-# 2. Ask MiniMax to reflect
-log "Asking MiniMax for reflection..."
+# 2. Ask LLM to reflect
+LLM_CMD="${CLAUDE_LLM_CMD:-llm}"
+log "Running reflection via: $LLM_CMD"
 
 PROMPT="You are an AI assistant doing your weekly self-reflection. Your goal is to identify YOUR OWN behavioral patterns — not to summarize what happened or repeat facts the user already knows.
 
@@ -109,26 +109,20 @@ FIRST: Write an updated insights.md in full. Requirements:
 - Add week tag: $WEEK
 - Increment version if already versioned
 
-SECOND: Write a SHORT summary (max 150 words) in Traditional Chinese:
-- 這週我（AI）的行為模式
-- 哪個 session 最值得注意（good 或 wrong）以及為什麼
-- 下週要特別留意什麼（針對我自己的行為）
+SECOND: Write a SHORT summary (max 150 words) in English:
+- This week's behavioral patterns
+- Most notable session (good or wrong) and why
+- What to watch out for next week (your own behavior)
 
 Format exactly:
 <updated insights.md content>
 ---REFLECTION_SUMMARY---
-<150-word Traditional Chinese summary>"
+<150-word English summary>"
 
-# Call LLM — configurable via CLAUDE_LLM_CMD env var
-LLM_CMD="${CLAUDE_LLM_CMD:-llm}"
-FULL_PROMPT="You are a disciplined AI assistant doing weekly self-reflection. Follow the output format exactly.
-
-$PROMPT"
-
-FULL_RESPONSE=$(echo "$FULL_PROMPT" | $LLM_CMD 2>>"$LOG")
+FULL_RESPONSE=$(echo "$PROMPT" | $LLM_CMD 2>>"$LOG")
 
 if [ -z "$FULL_RESPONSE" ]; then
-    log "ERROR: No response from LLM (cmd: $LLM_CMD). Check CLAUDE_LLM_CMD env var."
+    log "ERROR: No response from LLM (cmd: $LLM_CMD). Set CLAUDE_LLM_CMD env var."
     exit 1
 fi
 
@@ -145,18 +139,22 @@ fi
 echo "$NEW_INSIGHTS" > "$INSIGHTS"
 log "insights.md updated."
 
-# 5. Save reflection summary (with shown=false for next session pickup)
-python3 - <<EOF
-import json
+# 5. Save reflection summary (shown=false so next session picks it up)
+python3 - <<PYEOF
+import json, os
 from datetime import date
+from pathlib import Path
 
-data   = json.loads('''$DATA''')
+vector_dir = Path(os.environ.get("CLAUDE_MEMORY_DIR", Path.home() / ".claude" / "memory_vectors"))
+latest_ref = vector_dir / "latest_reflection.json"
+
+data    = json.loads("""$DATA""")
 summary = """$SUMMARY"""
-week   = "$WEEK"
+week    = "$WEEK"
 
 result = {
-    "date":  "$(date +%Y-%m-%d)",
-    "week":  week,
+    "date":    "$(date +%Y-%m-%d)",
+    "week":    week,
     "summary": summary.strip(),
     "stats": {
         "week_sessions": data["week_sessions"],
@@ -166,10 +164,10 @@ result = {
     },
     "shown": False
 }
-with open("$LATEST_REF", "w", encoding="utf-8") as f:
+with open(latest_ref, "w", encoding="utf-8") as f:
     json.dump(result, f, ensure_ascii=False, indent=2)
-print("Reflection saved to latest_reflection.json")
-EOF
+print("Reflection saved.")
+PYEOF
 
 log "=== Reflection complete ==="
 echo ""
