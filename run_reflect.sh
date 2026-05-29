@@ -1,10 +1,17 @@
 #!/bin/bash
-# Claude assistant weekly reflection — uses mmx CLI (no Anthropic API key needed)
-# Runs every Sunday 10:05, reads sessions from the past week, produces insights.md update
+# Claude assistant weekly reflection
+# Runs every Sunday, reads sessions from the past week, produces insights.md update
+#
+# Requires an LLM CLI that accepts piped input. Configure via CLAUDE_LLM_CMD:
+#   export CLAUDE_LLM_CMD="mmx text chat --non-interactive --quiet --message"
+#   export CLAUDE_LLM_CMD="ollama run llama3"
+#   export CLAUDE_LLM_CMD="sgpt"         # shell-gpt
+#   export CLAUDE_LLM_CMD="llm"          # Simon Willison's llm CLI
+# Default: reads from CLAUDE_LLM_CMD env var, falls back to 'llm' (https://llm.datasette.io)
 set -euo pipefail
 
 MEMORY_TOOLS="$HOME/.claude/memory_tools"
-VECTOR_DIR="$HOME/.claude/projects/-Users-h60613/memory_vectors"
+VECTOR_DIR="${CLAUDE_MEMORY_DIR:-$HOME/.claude/memory_vectors}"
 INSIGHTS="$VECTOR_DIR/insights.md"
 LATEST_REF="$VECTOR_DIR/latest_reflection.json"
 LOG="$HOME/.claude/logs/claude-reflect-$(date +%Y-%m-%d).log"
@@ -112,14 +119,16 @@ Format exactly:
 ---REFLECTION_SUMMARY---
 <150-word Traditional Chinese summary>"
 
-FULL_RESPONSE=$(mmx text chat \
-    --non-interactive \
-    --quiet \
-    --message "system:You are a disciplined AI assistant doing weekly self-reflection. Follow the output format exactly." \
-    --message "user:$PROMPT" 2>>"$LOG")
+# Call LLM — configurable via CLAUDE_LLM_CMD env var
+LLM_CMD="${CLAUDE_LLM_CMD:-llm}"
+FULL_PROMPT="You are a disciplined AI assistant doing weekly self-reflection. Follow the output format exactly.
+
+$PROMPT"
+
+FULL_RESPONSE=$(echo "$FULL_PROMPT" | $LLM_CMD 2>>"$LOG")
 
 if [ -z "$FULL_RESPONSE" ]; then
-    log "ERROR: No response from MiniMax. Aborting."
+    log "ERROR: No response from LLM (cmd: $LLM_CMD). Check CLAUDE_LLM_CMD env var."
     exit 1
 fi
 

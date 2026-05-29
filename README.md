@@ -7,8 +7,6 @@
 
 A lightweight self-learning memory system for Claude — stores session summaries as vectors, retrieves relevant past context at session start, and distills weekly insights via reflection.
 
-Inspired by the three-layer memory architecture from [esun-sim-trader](https://github.com/), adapted for AI assistant use.
-
 ## Design Philosophy
 
 ### Claude already has a memory system
@@ -90,8 +88,12 @@ score = 0.7 × cosine_similarity + 0.2 × recency + 0.1 × complexity
 - A local embedding endpoint at `http://localhost:11435/v1/embed`
   - Compatible with [macOSUtilityBridge](https://github.com/) (Apple NLEmbedding 512d)
   - Or any server accepting `{"text": "...", "language": "en"}` → `{"embedding": [...]}`
-- `mmx` CLI for weekly reflection ([MiniMax](https://www.minimaxi.com/))
-  - `npm install -g mmx-cli && mmx auth login --api-key <key>`
+- An LLM CLI for weekly reflection — any of the following works:
+  - [`llm`](https://llm.datasette.io) (default) — `pip install llm && llm keys set openai`
+  - [`ollama`](https://ollama.com) — `ollama run llama3`
+  - [`sgpt`](https://github.com/TheR1D/shell_gpt) — `pip install shell-gpt`
+  - Any CLI that reads from stdin and writes to stdout
+  - Configure via `CLAUDE_LLM_CMD` env var (see Configuration)
 
 ## Setup
 
@@ -117,6 +119,7 @@ bash setup.sh
 | `CLAUDE_EMBED_URL` | `http://localhost:11435/v1/embed` | Embedding endpoint |
 | `CLAUDE_TOOLS_DIR` | `~/.claude/memory_tools` | Where scripts are installed |
 | `CLAUDE_LOG_DIR` | `~/.claude/logs` | Reflection log directory |
+| `CLAUDE_LLM_CMD` | `llm` | LLM CLI command for weekly reflection (reads from stdin) |
 
 ## Usage
 
@@ -140,14 +143,18 @@ python3 ~/.claude/memory_tools/claude_memory_search.py --query "IPv6 socket erro
 ### Weekly reflection (manual)
 
 ```bash
+# Using default (llm CLI)
 bash ~/run_claude_reflect.sh
+
+# Using a different LLM
+CLAUDE_LLM_CMD="ollama run llama3" bash ~/run_claude_reflect.sh
 ```
 
 ### Scheduled weekly reflection (cron)
 
 ```bash
 # Add to crontab (crontab -e):
-5 10 * * 0 CLAUDE_MEMORY_DIR=$HOME/.claude/memory_vectors bash $HOME/run_claude_reflect.sh
+5 10 * * 0 CLAUDE_LLM_CMD="llm" bash $HOME/run_claude_reflect.sh
 ```
 
 ## File structure
