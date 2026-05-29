@@ -35,9 +35,8 @@ cp "$SCRIPT_DIR/run_reflect.sh" "$HOME/run_claude_reflect.sh"
 chmod +x "$HOME/run_claude_reflect.sh"
 echo "✅ Reflection script installed at ~/run_claude_reflect.sh"
 
-# 5. Show CLAUDE.md snippet
 echo ""
-echo "=== Manual step: add to ~/.claude/CLAUDE.md ==="
-cat "$SCRIPT_DIR/CLAUDE.md.snippet"
+echo "✅ All done!"
 echo ""
-echo "Done! Run 'python3 $TOOLS_DIR/claude_memory_search.py --query \"test\"' to verify."
+echo "Next: paste this repo's README to Claude and ask it to activate the memory system."
+echo "Or run: python3 $TOOLS_DIR/claude_memory_search.py --query \"test\" to verify."
