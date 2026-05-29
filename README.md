@@ -9,6 +9,40 @@ A lightweight self-learning memory system for Claude — stores session summarie
 
 Inspired by the three-layer memory architecture from [esun-sim-trader](https://github.com/), adapted for AI assistant use.
 
+## Design Philosophy
+
+### Claude already has a memory system
+
+Claude Code has a built-in memory system: `MEMORY.md`, project files, devlogs, and the `/remember` command. These are **user-verified, human-maintained, and loaded into every session context**. They are the primary source of truth and should not be replaced.
+
+This project is a **supplementary layer**, not a replacement. It fills two specific gaps the native system doesn't cover:
+
+| Native memory system | This project |
+|---------------------|--------------|
+| User-verified facts and preferences | AI-observed session patterns |
+| Loaded into every session (always on) | Injected only when semantically relevant |
+| Manually maintained | Automatically recorded |
+| What the user wants Claude to know | What Claude has learned about its own behavior |
+
+### What this adds
+
+**Semantic recall** — "Last time we worked on something similar, here's what happened." The native system can store facts, but it can't semantically search past sessions to surface relevant context.
+
+**Behavioral self-evaluation** — Claude rates each session (`good` / `mixed` / `wrong`) and reflects weekly on its own patterns: what approaches work, what mistakes repeat. This is about the AI's behavior, not the user's preferences.
+
+### What this deliberately does NOT do
+
+- ❌ Replace or override the native memory system
+- ❌ Record user preferences or project decisions (those belong in `MEMORY.md`)
+- ❌ Store human-readable notes (this is for the AI, not for you)
+- ❌ Conflict with `/remember` — explicit memories go to the native system as always
+
+### Single-user design
+
+This is designed for a **single developer working alone with Claude Code**. The value is in long-term pattern recognition: after weeks of sessions, the weekly reflection starts surfacing genuine behavioral insights — what types of tasks tend to go wrong, which approaches consistently work, what the AI should watch out for.
+
+The `insights.md` produced by weekly reflection is explicitly marked `⚠️ AI-inferred` to distinguish it from the authoritative, user-maintained devlogs.
+
 ## How it works
 
 ```
@@ -27,7 +61,7 @@ Every Sunday  → mmx reflection → update insights.md (📓 next session)
 |-------|---------|------|
 | 1 — Session log | What was done, which projects, which tools | Each session end |
 | 2 — Self-eval | `good` / `mixed` / `wrong` + reason | Each session end |
-| 3 — Insights | Distilled patterns: user habits, common tasks, watch-outs | Every Sunday |
+| 3 — Insights | AI behavioral patterns only (⚠️ AI-inferred, not authoritative) | Every Sunday |
 
 ### Hybrid search scoring
 
