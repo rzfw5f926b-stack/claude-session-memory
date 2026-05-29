@@ -1,5 +1,10 @@
 # claude-session-memory
 
+> **繁體中文說明**
+> 這是一個讓 Claude 具備跨 session 自我學習能力的記憶系統。
+> 安裝後，Claude 每次 session 結束時會自動記錄摘要與自評，下次 session 開頭會搜尋相關過去記憶並注入 context，每週透過反思提煉洞見。
+> **直接把這整個 README 貼給 AI，它就能幫你完成安裝。**
+
 A lightweight self-learning memory system for Claude — stores session summaries as vectors, retrieves relevant past context at session start, and distills weekly insights via reflection.
 
 Inspired by the three-layer memory architecture from [esun-sim-trader](https://github.com/), adapted for AI assistant use.
