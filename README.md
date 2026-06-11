@@ -44,13 +44,13 @@ The `insights.md` produced by weekly reflection is explicitly marked `⚠️ AI-
 ## How it works
 
 ```
-Session start → vector search → inject relevant past context (🧠)
+UserPromptSubmit hook → memory search (once per session, session-lock) → inject 🧠
                                                         ↓
                                                respond to user
                                                         ↓
 Session end   → embed summary → write to DB → self-evaluate (💾)
                                                         ↓
-Every Sunday  → mmx reflection → update insights.md (📓 next session)
+Every Sunday  → LLM reflection → update insights.md (📓 next session)
 ```
 
 ### Three layers
@@ -71,7 +71,7 @@ score = 0.7 × cosine_similarity + 0.2 × recency + 0.1 × complexity
 
 - **recency**: `1 / (1 + days_ago / 30)` — sessions from last week rank higher than ones from 3 months ago
 - **complexity**: longer summaries (richer sessions) score slightly higher
-- **threshold**: 0.5 — below this, search exits silently
+- **threshold**: 0.78 — below this, search exits silently
 
 ### Three UX signals
 
@@ -86,9 +86,9 @@ score = 0.7 × cosine_similarity + 0.2 × recency + 0.1 × complexity
 - Python **3.10+** (required for `list[dict]` type syntax)
 - `numpy` (`pip install numpy`)
 - A local embedding endpoint. Options (pick one):
-  - **[Ollama](https://ollama.com)** (easiest): `ollama pull nomic-embed-text` then set `CLAUDE_EMBED_URL=http://localhost:11434/api/embed` — note: Ollama uses a different request format, see [Adapters](#embedding-adapters) below
+  - **macOS 14+ built-in** (recommended, zero setup): uses Apple `NLContextualEmbedding` via `macOSUtilityBridge` at `localhost:11435` — 512d Transformer vectors, no Ollama needed
+  - **[Ollama](https://ollama.com)**: `ollama pull nomic-embed-text` then set `CLAUDE_EMBED_URL=http://localhost:11434/api/embed` — note: Ollama uses a different request format, see [Adapters](#embedding-adapters) below
   - **OpenAI-compatible server**: any server accepting `POST {"text": "...", "language": "en"}` → `{"embedding": [...]}`
-  - **[macOSUtilityBridge](https://github.com/)** (macOS only): Apple NLEmbedding 512d at `localhost:11435`
 - An LLM CLI for weekly reflection — any of the following works:
   - [`llm`](https://llm.datasette.io) (default) — `pip install llm && llm keys set openai`
   - [`ollama`](https://ollama.com) — `ollama run llama3`
@@ -99,7 +99,7 @@ score = 0.7 × cosine_similarity + 0.2 × recency + 0.1 × complexity
 ## Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-session-memory
+git clone https://github.com/rzfw5f926b-stack/claude-session-memory
 cd claude-session-memory
 pip install -r requirements.txt
 bash setup.sh
@@ -107,10 +107,57 @@ bash setup.sh
 
 `setup.sh` will:
 1. Create `~/.claude/memory_vectors/` (or `$CLAUDE_MEMORY_DIR`)
-2. Install scripts to `~/.claude/memory_tools/`
+2. Install scripts to `~/.claude/memory_tools/` (including the hook)
 3. Initialize the SQLite databases
 4. Install `~/run_claude_reflect.sh`
-5. Print the snippet to add to `~/.claude/CLAUDE.md`
+5. Register the `UserPromptSubmit` hook in `~/.claude/settings.json`
+6. Install the `/mem` skill at `~/.claude/skills/mem/`
+7. Print the snippet to add to `~/.claude/CLAUDE.md`
+
+## Automatic Session Start (Hook)
+
+The core of the system is a `UserPromptSubmit` hook that auto-injects memory on the first substantive message of each session.
+
+**Why session-lock instead of per-turn:**
+Claude Code's `UserPromptSubmit` hook output (`additionalContext`) accumulates in conversation history and is NOT cleared between turns — this is a [known issue](https://github.com/anthropics/claude-code/issues/40216). Running the search on every message would bloat the context window with duplicate results. The session-lock pattern solves this: search runs exactly once per session, then silently exits on subsequent messages.
+
+**Skip conditions (without creating the lock):**
+- Prompt ≤ 4 characters
+- Pure greetings (`hi`, `hello`, `hey`, `你好`, etc.)
+
+This means a short opening message like "ok" won't consume the one injection — the next substantive message will still trigger it.
+
+**How to register the hook** (done automatically by `setup.sh`):
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/memory_tools/session_memory_hook.py"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## /mem Skill
+
+The `/mem` skill provides on-demand memory access, bypassing the session lock entirely.
+
+**Usage:**
+- `/mem [keywords]` — search memory (top-5; auto-derives keywords from context if omitted)
+- `/mem log` — log the current session immediately (without waiting for session end)
+
+**Install** (done automatically by `setup.sh`): creates `~/.claude/skills/mem/SKILL.md`.
 
 ## Configuration
 
@@ -141,6 +188,8 @@ python3 ~/.claude/memory_tools/claude_memory_log.py \
 python3 ~/.claude/memory_tools/claude_memory_search.py --query "IPv6 socket error"
 ```
 
+Or via the skill: `/mem IPv6 socket error`
+
 ### Weekly reflection (manual)
 
 ```bash
@@ -163,14 +212,18 @@ CLAUDE_LLM_CMD="ollama run llama3" bash ~/run_claude_reflect.sh
 ```
 ~/.claude/
 ├── memory_tools/
-│   ├── claude_memory_log.py      ← session write
-│   └── claude_memory_search.py   ← hybrid search
+│   ├── claude_memory_log.py         ← session write
+│   ├── claude_memory_search.py      ← hybrid search
+│   └── session_memory_hook.py       ← UserPromptSubmit hook (session-lock)
 ├── memory_vectors/
-│   ├── claude_memory.db          ← sessions + self_evals
-│   ├── vectors.db                ← 512d embeddings
-│   ├── insights.md               ← weekly distilled patterns
-│   └── latest_reflection.json    ← pending reflection notification
-└── CLAUDE.md                     ← add snippet from CLAUDE.md.snippet
+│   ├── claude_memory.db             ← sessions + self_evals
+│   ├── vectors.db                   ← 512d embeddings
+│   ├── insights.md                  ← weekly distilled patterns
+│   └── latest_reflection.json       ← pending reflection notification
+├── skills/
+│   └── mem/
+│       └── SKILL.md                 ← /mem skill (search + log)
+└── CLAUDE.md                        ← add snippet from setup.sh output
 ```
 
 ### Storage size
